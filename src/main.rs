@@ -29,6 +29,7 @@ fn main() {
     // Redirect stderr to a log file so eprintln! traces never bleed into the
     // terminal UI. Both the file descriptor swap and the open are done via libc
     // so we stay dependency-free.
+    use AnsiCode::{Reset, FgBlue}
     unsafe {
         let path = b"debug.log\0";
         let fd = libc::open(
@@ -83,12 +84,28 @@ fn main() {
     renderer.add_surface(TerminalSurface::new(
         0,
         0,
-        term_width,
+        term_width / 2,
         term_height,
-        "Main Box".into(),
+        "Left Box".into(),
     ));
-    renderer.update_surface("Main Box".into(), |mut surface| {
+    renderer.add_surface(TerminalSurface::new(
+        term_width / 2 + 1,
+        0,
+        term_width / 2,
+        term_height,
+        "Right Box".into(),
+    ));
+    renderer.update_surface("Left Box".into(), |mut surface| {
         surface.set_text(cage.clone(), Some(BorderStyle::rounded()));
+        surface
+    });
+    renderer.update_surface("Right Box".into(), |mut surface| {
+        surface.set_text(
+            format!(
+                "{FgBlue}Hello from the right box!{Reset}",
+            ),
+            Some(BorderStyle::rounded()),
+        );
         surface
     });
 
