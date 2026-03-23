@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::{thread::sleep, time::Duration};
 
 use crate::escape_sequencer::{AnsiCode, EscapeSequencer};
-use crate::terminal_rederer::{TerminalRenderer, TerminalSurface};
+use crate::terminal_rederer::{BorderStyle, TerminalRenderer, TerminalSurface};
 
 static RESIZED: AtomicBool = AtomicBool::new(false);
 
@@ -26,6 +26,22 @@ fn get_term_size() -> (usize, usize) {
 }
 
 fn main() {
+    // Redirect stderr to a log file so eprintln! traces never bleed into the
+    // terminal UI. Both the file descriptor swap and the open are done via libc
+    // so we stay dependency-free.
+    unsafe {
+        let path = b"debug.log\0";
+        let fd = libc::open(
+            path.as_ptr() as *const libc::c_char,
+            libc::O_WRONLY | libc::O_CREAT | libc::O_TRUNC,
+            0o644,
+        );
+        if fd >= 0 {
+            libc::dup2(fd, libc::STDERR_FILENO);
+            libc::close(fd);
+        }
+    }
+
     // Register SIGWINCH handler
     unsafe {
         libc::signal(
@@ -72,7 +88,7 @@ fn main() {
         "Main Box".into(),
     ));
     renderer.update_surface("Main Box".into(), |mut surface| {
-        surface.set_text(cage.clone());
+        surface.set_text(cage.clone(), Some(BorderStyle::rounded()));
         surface
     });
 

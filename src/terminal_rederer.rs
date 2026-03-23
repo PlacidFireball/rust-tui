@@ -2,6 +2,51 @@ use std::io::Write;
 
 use crate::escape_sequencer::EscapeSequencer;
 
+/// The six characters used to draw a border around a surface.
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+pub struct BorderCharacters {
+    pub top_left: char,
+    pub top_right: char,
+    pub bottom_left: char,
+    pub bottom_right: char,
+    pub left: char,
+    pub right: char,
+    pub horizontal: char,
+}
+
+/// Controls the style of border drawn around a surface's content.
+/// Each variant carries its resolved `BorderCharacters` so callers can
+/// inspect exactly which glyphs will be used without matching again.
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+pub enum BorderStyle {
+    /// Rounded corners using UTF-8 box-drawing characters: ╭─╮ / │ │ / ╰─╯
+    Rounded(BorderCharacters),
+}
+
+impl BorderStyle {
+    /// Construct a `Rounded` border with its canonical characters.
+    pub fn rounded() -> Self {
+        BorderStyle::Rounded(BorderCharacters {
+            top_left: '╭',
+            top_right: '╮',
+            bottom_left: '╰',
+            bottom_right: '╯',
+            left: '│',
+            right: '│',
+            horizontal: '─',
+        })
+    }
+
+    /// Returns a reference to the resolved border characters for this style.
+    pub fn characters(&self) -> &BorderCharacters {
+        match self {
+            BorderStyle::Rounded(chars) => chars,
+        }
+    }
+}
+
 #[allow(dead_code, unused)]
 #[derive(Debug, Clone)]
 pub struct TerminalSurface {
@@ -12,7 +57,10 @@ pub struct TerminalSurface {
 
     pub id: String,
 
+    /// Raw wrapped content lines, without any border decoration.
     lines: Vec<String>,
+    /// Active border style, if any.
+    border: Option<BorderStyle>,
 }
 #[allow(dead_code, unused)]
 impl TerminalSurface {
@@ -24,6 +72,7 @@ impl TerminalSurface {
             height,
             id,
             lines: vec![],
+            border: None,
         }
     }
 
@@ -67,20 +116,36 @@ impl TerminalSurface {
         s.len()
     }
 
-    pub fn set_text(&mut self, text: String) {
+    /// Set the surface text, optionally wrapping it in a border.
+    ///
+    /// When `border` is `Some`, the inner content width is reduced by 2 (one
+    /// column for each side glyph) and the raw wrapped lines are stored without
+    /// decoration. Pass `None` to retain the previous border style unchanged,
+    /// or use `set_border` to update the style independently.
+    pub fn set_text(&mut self, text: String, border: Option<BorderStyle>) {
+        if let Some(style) = border {
+            self.border = Some(style);
+        }
+
+        // Content width: shrink by 2 when a border is active (one column each side).
+        let content_width = match &self.border {
+            Some(_) => self.width.saturating_sub(2),
+            None => self.width,
+        };
+
         self.lines.clear();
         for line in text.split('\n') {
             let mut remaining = line;
             loop {
                 let visible = Self::visible_len(remaining);
-                if visible <= self.width {
+                if visible <= content_width {
                     self.lines.push(remaining.to_string());
                     break;
                 }
 
-                let width_byte_offset = Self::byte_offset_after_visible(remaining, self.width);
+                let width_byte_offset = Self::byte_offset_after_visible(remaining, content_width);
 
-                // Find the last space within visible width
+                // Find the last space within the visible content width.
                 let split_byte = match remaining[..width_byte_offset].rfind(' ') {
                     Some(pos) => pos,
                     None => width_byte_offset,
@@ -88,6 +153,77 @@ impl TerminalSurface {
 
                 self.lines.push(remaining[..split_byte].to_string());
                 remaining = remaining[split_byte..].trim_start();
+            }
+        }
+    }
+
+    /// Compose the final lines to be rendered, applying the active border and
+    /// clamping to `self.height`.
+    ///
+    /// When no border is active the raw lines are returned (up to `self.height`).
+    /// When a border is active:
+    ///   - a top border row is prepended
+    ///   - up to `self.height - 2` content rows are included, each padded and
+    ///     flanked by the side glyphs
+    ///   - a bottom border row is appended
+    ///
+    /// Raw lines beyond the visible window are preserved in `self.lines` to
+    /// support future scrolling.
+    fn render_lines(&self) -> Vec<String> {
+        match &self.border {
+            None => self.lines.iter().take(self.height).cloned().collect(),
+            Some(style) => {
+                let ch = style.characters();
+                let inner_width = self.width.saturating_sub(2);
+                let max_content_rows = self.height.saturating_sub(2);
+
+                // ╭──────╮
+                let top = format!(
+                    "{tl}{bar}{tr}",
+                    tl = ch.top_left,
+                    bar = ch.horizontal.to_string().repeat(inner_width),
+                    tr = ch.top_right,
+                );
+
+                // │ text │  (padded to inner_width, blank rows fill remaining height)
+                let empty_row = format!(
+                    "{l}{pad}{r}",
+                    l = ch.left,
+                    pad = " ".repeat(inner_width),
+                    r = ch.right,
+                );
+                let content: Vec<String> = self
+                    .lines
+                    .iter()
+                    .take(max_content_rows)
+                    .map(|line| {
+                        let vis = Self::visible_len(line);
+                        let padding = inner_width.saturating_sub(vis);
+                        format!(
+                            "{l}{line}{pad}{r}",
+                            l = ch.left,
+                            pad = " ".repeat(padding),
+                            r = ch.right,
+                        )
+                    })
+                    .chain(std::iter::repeat(empty_row).take(
+                        max_content_rows.saturating_sub(self.lines.len().min(max_content_rows)),
+                    ))
+                    .collect();
+
+                // ╰──────╯
+                let bottom = format!(
+                    "{bl}{bar}{br}",
+                    bl = ch.bottom_left,
+                    bar = ch.horizontal.to_string().repeat(inner_width),
+                    br = ch.bottom_right,
+                );
+
+                let mut result = Vec::with_capacity(2 + content.len());
+                result.push(top);
+                result.extend(content);
+                result.push(bottom);
+                result
             }
         }
     }
@@ -122,8 +258,8 @@ impl TerminalRenderer {
 
     fn render_surface(&mut self, surface: TerminalSurface) {
         eprintln!("render_surface: {:?}", surface);
-        for (line, i) in surface.lines.iter().zip(0..surface.lines.len()) {
-            eprintln!("render_line: {i} {line}");
+        let lines = surface.render_lines();
+        for (i, line) in lines.iter().enumerate() {
             self.sequencer
                 .set_cursor_position(surface.pos_x, surface.pos_y + i);
             print!("{line}")
