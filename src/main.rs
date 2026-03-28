@@ -84,14 +84,14 @@ fn main() {
     );
 
     renderer.clear_screen();
-    renderer.add_surface(TerminalPane::new(
+    renderer.add_pane(TerminalPane::new(
         0,
         0,
         term_width / 2,
         term_height,
         "Left Box".into(),
     ));
-    renderer.add_surface(TerminalPane::new(
+    renderer.add_pane(TerminalPane::new(
         term_width / 2 + 1,
         0,
         term_width / 2,

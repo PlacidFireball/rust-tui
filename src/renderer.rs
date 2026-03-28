@@ -210,8 +210,8 @@ impl TerminalRenderer {
         }
     }
 
-    pub fn add_surface(&mut self, surface: TerminalPane) {
-        self.panes.push(surface);
+    pub fn add_pane(&mut self, pane: TerminalPane) {
+        self.panes.push(pane);
     }
 
     fn render(&mut self) {
@@ -222,12 +222,12 @@ impl TerminalRenderer {
         std::io::stdout().flush().expect("failure to flush stdout");
     }
 
-    fn render_surface(&mut self, surface: TerminalPane) {
-        eprintln!("render_surface: {:?}", surface);
-        let lines = surface.render_lines();
+    fn render_surface(&mut self, pane: TerminalPane) {
+        eprintln!("render_surface: {:?}", pane);
+        let lines = pane.render_lines();
         for (i, line) in lines.iter().enumerate() {
             self.sequencer
-                .set_cursor_position(surface.pos_x, surface.pos_y + i);
+                .set_cursor_position(pane.pos_x, pane.pos_y + i);
             print!("{line}")
         }
     }
@@ -266,7 +266,7 @@ impl TerminalRenderer {
 
     pub fn on_resize(&mut self, term_width: usize, term_height: usize) {
         self.sequencer.on_resize(term_width, term_height);
-        eprintln!("on_resize");
+        eprintln!("on_resize term_width: {term_width} term_height: {term_height}");
     }
 
     pub fn clear_screen(&mut self) {
