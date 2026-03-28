@@ -1,10 +1,12 @@
-pub(crate) mod escape_sequencer;
-pub(crate) mod terminal_rederer;
+pub(crate) mod renderer;
+pub(crate) mod sequencer;
+pub(crate) mod ui;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::{thread::sleep, time::Duration};
 
-use crate::escape_sequencer::{AnsiCode, EscapeSequencer};
-use crate::terminal_rederer::{BorderStyle, TerminalRenderer, TerminalSurface};
+use crate::renderer::{TerminalPane, TerminalRenderer};
+use crate::sequencer::{AnsiCode, EscapeSequencer};
+use crate::ui::BorderCharacters;
 
 static RESIZED: AtomicBool = AtomicBool::new(false);
 
@@ -29,7 +31,7 @@ fn main() {
     // Redirect stderr to a log file so eprintln! traces never bleed into the
     // terminal UI. Both the file descriptor swap and the open are done via libc
     // so we stay dependency-free.
-    use AnsiCode::{Reset, FgBlue}
+    use AnsiCode::{FgBlue, Reset};
     unsafe {
         let path = b"debug.log\0";
         let fd = libc::open(
@@ -81,30 +83,28 @@ fn main() {
     );
 
     renderer.clear_screen();
-    renderer.add_surface(TerminalSurface::new(
+    renderer.add_surface(TerminalPane::new(
         0,
         0,
         term_width / 2,
         term_height,
         "Left Box".into(),
     ));
-    renderer.add_surface(TerminalSurface::new(
+    renderer.add_surface(TerminalPane::new(
         term_width / 2 + 1,
         0,
         term_width / 2,
         term_height,
         "Right Box".into(),
     ));
-    renderer.update_surface("Left Box".into(), |mut surface| {
-        surface.set_text(cage.clone(), Some(BorderStyle::rounded()));
+    renderer.update_pane("Left Box".into(), |mut surface| {
+        surface.set_text(cage.clone(), Some(BorderCharacters::rounded()));
         surface
     });
-    renderer.update_surface("Right Box".into(), |mut surface| {
+    renderer.update_pane("Right Box".into(), |mut surface| {
         surface.set_text(
-            format!(
-                "{FgBlue}Hello from the right box!{Reset}",
-            ),
-            Some(BorderStyle::rounded()),
+            format!("{FgBlue}Hello from the right box!{Reset}",),
+            Some(BorderCharacters::rounded()),
         );
         surface
     });

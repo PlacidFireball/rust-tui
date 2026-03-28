@@ -1,55 +1,10 @@
 use std::io::Write;
 
-use crate::escape_sequencer::EscapeSequencer;
-
-/// The six characters used to draw a border around a surface.
-#[allow(dead_code)]
-#[derive(Debug, Clone)]
-pub struct BorderCharacters {
-    pub top_left: char,
-    pub top_right: char,
-    pub bottom_left: char,
-    pub bottom_right: char,
-    pub left: char,
-    pub right: char,
-    pub horizontal: char,
-}
-
-/// Controls the style of border drawn around a surface's content.
-/// Each variant carries its resolved `BorderCharacters` so callers can
-/// inspect exactly which glyphs will be used without matching again.
-#[allow(dead_code)]
-#[derive(Debug, Clone)]
-pub enum BorderStyle {
-    /// Rounded corners using UTF-8 box-drawing characters: ╭─╮ / │ │ / ╰─╯
-    Rounded(BorderCharacters),
-}
-
-impl BorderStyle {
-    /// Construct a `Rounded` border with its canonical characters.
-    pub fn rounded() -> Self {
-        BorderStyle::Rounded(BorderCharacters {
-            top_left: '╭',
-            top_right: '╮',
-            bottom_left: '╰',
-            bottom_right: '╯',
-            left: '│',
-            right: '│',
-            horizontal: '─',
-        })
-    }
-
-    /// Returns a reference to the resolved border characters for this style.
-    pub fn characters(&self) -> &BorderCharacters {
-        match self {
-            BorderStyle::Rounded(chars) => chars,
-        }
-    }
-}
+use crate::{sequencer::EscapeSequencer, ui::BorderCharacters};
 
 #[allow(dead_code, unused)]
 #[derive(Debug, Clone)]
-pub struct TerminalSurface {
+pub struct TerminalPane {
     pub pos_x: usize,
     pub pos_y: usize,
     pub width: usize,
@@ -60,12 +15,12 @@ pub struct TerminalSurface {
     /// Raw wrapped content lines, without any border decoration.
     lines: Vec<String>,
     /// Active border style, if any.
-    border: Option<BorderStyle>,
+    border: Option<BorderCharacters>,
 }
 #[allow(dead_code, unused)]
-impl TerminalSurface {
+impl TerminalPane {
     pub fn new(pos_x: usize, pos_y: usize, width: usize, height: usize, id: String) -> Self {
-        TerminalSurface {
+        TerminalPane {
             pos_x,
             pos_y,
             width,
@@ -122,7 +77,7 @@ impl TerminalSurface {
     /// column for each side glyph) and the raw wrapped lines are stored without
     /// decoration. Pass `None` to retain the previous border style unchanged,
     /// or use `set_border` to update the style independently.
-    pub fn set_text(&mut self, text: String, border: Option<BorderStyle>) {
+    pub fn set_text(&mut self, text: String, border: Option<BorderCharacters>) {
         if let Some(style) = border {
             self.border = Some(style);
         }
@@ -173,7 +128,11 @@ impl TerminalSurface {
         match &self.border {
             None => self.lines.iter().take(self.height).cloned().collect(),
             Some(style) => {
-                let ch = style.characters();
+                let ch = self
+                    .border
+                    .clone()
+                    .or_else(|| Some(BorderCharacters::ascii()))
+                    .unwrap();
                 let inner_width = self.width.saturating_sub(2);
                 let max_content_rows = self.height.saturating_sub(2);
 
@@ -232,7 +191,7 @@ impl TerminalSurface {
 #[allow(dead_code, unused)]
 pub struct TerminalRenderer {
     pub sequencer: EscapeSequencer,
-    surfaces: Vec<TerminalSurface>,
+    panes: Vec<TerminalPane>,
 }
 
 #[allow(dead_code, unused)]
@@ -240,23 +199,23 @@ impl TerminalRenderer {
     pub fn new(sequencer: EscapeSequencer) -> Self {
         TerminalRenderer {
             sequencer,
-            surfaces: vec![],
+            panes: vec![],
         }
     }
 
-    pub fn add_surface(&mut self, surface: TerminalSurface) {
-        self.surfaces.push(surface);
+    pub fn add_surface(&mut self, surface: TerminalPane) {
+        self.panes.push(surface);
     }
 
     fn render(&mut self) {
         eprintln!("render");
-        for surface in self.surfaces.clone() {
+        for surface in self.panes.clone() {
             self.render_surface(surface);
         }
         std::io::stdout().flush().expect("failure to flush stdout");
     }
 
-    fn render_surface(&mut self, surface: TerminalSurface) {
+    fn render_surface(&mut self, surface: TerminalPane) {
         eprintln!("render_surface: {:?}", surface);
         let lines = surface.render_lines();
         for (i, line) in lines.iter().enumerate() {
@@ -271,17 +230,17 @@ impl TerminalRenderer {
         self.render();
     }
 
-    pub fn update_surface<T: FnMut(TerminalSurface) -> TerminalSurface>(
+    pub fn update_pane<T: FnMut(TerminalPane) -> TerminalPane>(
         &mut self,
         id: String,
         mut callback: T,
     ) {
         let mut found = false;
-        for i in 0..self.surfaces.len() {
-            if self.surfaces[i].id == id {
+        for i in 0..self.panes.len() {
+            if self.panes[i].id == id {
                 found = true;
-                self.surfaces[i] = callback(self.surfaces[i].clone());
-                eprintln!("updated surface: {:?}", self.surfaces[i]);
+                self.panes[i] = callback(self.panes[i].clone());
+                eprintln!("updated surface: {:?}", self.panes[i]);
                 break;
             }
         }
