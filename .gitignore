@@ -1,4 +1,5 @@
 /target
+pub-fields-macro/target
 
 *.log
 AGENTS.md

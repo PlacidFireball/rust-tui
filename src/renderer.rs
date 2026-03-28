@@ -1,6 +1,13 @@
 use std::io::Write;
 
-use crate::{sequencer::EscapeSequencer, ui::BorderCharacters};
+pub enum RendererError {}
+
+type Result<T> = std::result::Result<T, RendererError>;
+
+use crate::{
+    config::{BorderCharacters, TerminalUIConfig},
+    sequencer::EscapeSequencer,
+};
 
 #[allow(dead_code, unused)]
 #[derive(Debug, Clone)]
@@ -247,6 +254,14 @@ impl TerminalRenderer {
         if found {
             self.on_change();
         }
+    }
+
+    pub fn with_config(&mut self, config: &TerminalUIConfig) -> Result<()> {
+        for (pane, idx) in config.panes.iter().zip(0..config.panes.len()).into_iter() {
+            unimplemented!()
+        }
+
+        Ok(())
     }
 
     pub fn on_resize(&mut self, term_width: usize, term_height: usize) {

@@ -1,116 +1,25 @@
-use serde::{Deserialize, Serialize};
+use crate::{
+    config::{TerminalUIConfig, TerminalUIConfigValidator},
+    get_term_size,
+    renderer::TerminalRenderer,
+    sequencer::EscapeSequencer,
+};
 
-use crate::{get_term_size, renderer::TerminalRenderer, sequencer::EscapeSequencer};
-
-enum TerminalUIError {
+#[allow(dead_code)]
+pub enum TerminalUIError {
     ConfigMissing,
     InvalidJson,
+    InvalidConfig { value_ptr: String, message: String },
 }
+use TerminalUIError::*;
 
-type Result<T> = std::result::Result<T, TerminalUIError>;
+pub(crate) type Result<T> = std::result::Result<T, TerminalUIError>;
 
 #[allow(dead_code)]
-struct TerminalUI {
+pub struct TerminalUI {
     renderer: TerminalRenderer,
+    config: TerminalUIConfig,
 }
-
-#[allow(non_camel_case_types)]
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(default)]
-struct BorderSettings {
-    preset: Option<BorderPreset>,
-    custom: Option<BorderCharacters>,
-}
-
-impl Default for BorderSettings {
-    fn default() -> Self {
-        Self {
-            preset: Some(BorderPreset::ascii),
-            custom: None,
-        }
-    }
-}
-
-#[allow(non_camel_case_types)]
-#[derive(Clone, Debug, Serialize, Deserialize)]
-enum BorderPreset {
-    rounded,
-    ascii,
-}
-
-#[allow(dead_code)]
-impl BorderPreset {
-    pub fn to_characters(&self) -> BorderCharacters {
-        match self {
-            Self::rounded => BorderCharacters::rounded(),
-            Self::ascii => BorderCharacters::ascii(),
-        }
-    }
-}
-
-/// The six characters used to draw a border around a surface.
-#[allow(dead_code)]
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct BorderCharacters {
-    pub top_left: char,
-    pub top_right: char,
-    pub bottom_left: char,
-    pub bottom_right: char,
-    pub left: char,
-    pub right: char,
-    pub horizontal: char,
-}
-
-impl BorderCharacters {
-    pub fn rounded() -> Self {
-        BorderCharacters {
-            top_left: '╭',
-            top_right: '╮',
-            bottom_left: '╰',
-            bottom_right: '╯',
-            left: '│',
-            right: '│',
-            horizontal: '─',
-        }
-    }
-
-    pub fn ascii() -> Self {
-        BorderCharacters {
-            top_left: '+',
-            top_right: '+',
-            bottom_left: '+',
-            bottom_right: '+',
-            left: '|',
-            right: '|',
-            horizontal: '-',
-        }
-    }
-}
-
-#[allow(dead_code)]
-#[derive(Serialize, Deserialize, Debug, Clone, Default)]
-struct Frame {
-    pub width: usize,
-    pub height: usize,
-    pub x: usize,
-    pub y: usize,
-}
-
-#[allow(dead_code)]
-#[derive(Serialize, Deserialize, Debug, Clone, Default)]
-struct TerminalUIPaneConfig {
-    name: String,
-    frame: Frame,
-    border: Option<BorderSettings>,
-}
-
-#[allow(dead_code)]
-#[derive(Serialize, Deserialize, Debug, Clone, Default)]
-struct TerminalUIConfig {
-    name: String,
-    panes: Vec<TerminalUIPaneConfig>,
-}
-
 #[allow(dead_code)]
 impl TerminalUI {
     fn get_term_size() -> (usize, usize) {
@@ -135,12 +44,12 @@ impl TerminalUI {
     pub fn from_config(config_path: &str) -> Result<Self> {
         let config_raw: String = match std::fs::read_to_string(config_path) {
             Ok(s) => s,
-            Err(_) => return Err(TerminalUIError::ConfigMissing),
+            Err(_) => return Err(ConfigMissing),
         };
 
         let config: TerminalUIConfig = match serde_json::from_str(&config_raw) {
             Ok(c) => c,
-            Err(_) => return Err(TerminalUIError::InvalidJson),
+            Err(_) => return Err(InvalidJson),
         };
 
         println!("{config:?}");
@@ -149,10 +58,14 @@ impl TerminalUI {
         let mut renderer: TerminalRenderer =
             TerminalRenderer::new(EscapeSequencer::new(term_width, term_height));
 
-        for pane in config.panes {
-            unimplemented!()
-        }
+        let mut config_validator = TerminalUIConfigValidator::new(term_width, term_height);
+        config_validator.validate(&config)?;
 
-        Ok(TerminalUI { renderer })
+        match renderer.with_config(&config) {
+            Ok(_) => {} // yey
+            Err(e) => match e {},
+        };
+
+        Ok(TerminalUI { renderer, config })
     }
 }

@@ -1,12 +1,13 @@
+pub(crate) mod config;
 pub(crate) mod renderer;
 pub(crate) mod sequencer;
 pub(crate) mod ui;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::{thread::sleep, time::Duration};
 
+use crate::config::BorderCharacters;
 use crate::renderer::{TerminalPane, TerminalRenderer};
 use crate::sequencer::{AnsiCode, EscapeSequencer};
-use crate::ui::BorderCharacters;
 
 static RESIZED: AtomicBool = AtomicBool::new(false);
 

@@ -1,0 +1,29 @@
+{
+  "name": "Double Pane",
+  "panes": [
+    {
+      "name": "Left Pane",
+      "frame": {
+        "width": "50%",
+        "height": "100%",
+        "x": 0,
+        "y": 0
+      },
+      "border": {
+        "preset": "rounded"
+      }
+    },
+    {
+      "name": "Right Pane",
+      "frame": {
+        "width": "50%",
+        "height": "100%",
+        "x": "50%",
+        "y": 0
+      },
+      "border": {
+        "preset": "rounded"
+      }
+    }
+  ]
+}
