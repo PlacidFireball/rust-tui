@@ -11,7 +11,8 @@
       },
       "border": {
         "preset": "rounded"
-      }
+      },
+      "initial_text": "Hello, World!"
     },
     {
       "name": "Right Pane",
@@ -23,7 +24,8 @@
       },
       "border": {
         "preset": "rounded"
-      }
+      },
+      "initial_text": "Goodbye, World!"
     }
   ]
 }

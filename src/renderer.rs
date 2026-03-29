@@ -4,6 +4,8 @@ pub enum RendererError {}
 
 type Result<T> = std::result::Result<T, RendererError>;
 
+use serde_json::Value;
+
 use crate::{
     config::{BorderCharacters, TerminalUIConfig},
     sequencer::EscapeSequencer,
@@ -26,16 +28,31 @@ pub struct TerminalPane {
 }
 #[allow(dead_code, unused)]
 impl TerminalPane {
-    pub fn new(pos_x: usize, pos_y: usize, width: usize, height: usize, id: String) -> Self {
-        TerminalPane {
+    pub fn new(
+        pos_x: usize,
+        pos_y: usize,
+        width: usize,
+        height: usize,
+        id: String,
+        border: Option<BorderCharacters>,
+        initial_text: Option<String>,
+    ) -> Self {
+        let mut pane = TerminalPane {
             pos_x,
             pos_y,
             width,
             height,
             id,
             lines: vec![],
-            border: None,
+            border: border,
+        };
+
+        match initial_text {
+            Some(text) => pane.set_text(text),
+            None => {}
         }
+
+        pane
     }
 
     /// Returns the number of visible (non-ANSI-escape) characters in a string.
@@ -84,11 +101,7 @@ impl TerminalPane {
     /// column for each side glyph) and the raw wrapped lines are stored without
     /// decoration. Pass `None` to retain the previous border style unchanged,
     /// or use `set_border` to update the style independently.
-    pub fn set_text(&mut self, text: String, border: Option<BorderCharacters>) {
-        if let Some(style) = border {
-            self.border = Some(style);
-        }
-
+    pub fn set_text(&mut self, text: String) {
         // Content width: shrink by 2 when a border is active (one column each side).
         let content_width = match &self.border {
             Some(_) => self.width.saturating_sub(2),
@@ -257,9 +270,49 @@ impl TerminalRenderer {
     }
 
     pub fn with_config(&mut self, config: &TerminalUIConfig) -> Result<()> {
-        for (pane, idx) in config.panes.iter().zip(0..config.panes.len()).into_iter() {
-            unimplemented!()
+        fn resolve_absolute(value: Value, term_dim: usize) -> usize {
+            match value {
+                Value::Number(number) => {
+                    (number.as_u64().expect("should work due to validation") as usize)
+                }
+                Value::String(relative_pct) => {
+                    let floating_dim = relative_pct
+                        .replace("%", "")
+                        .parse::<f64>()
+                        .expect("should work due to validation")
+                        / 100.0
+                        * term_dim as f64;
+
+                    floating_dim as usize
+                }
+                _ => unreachable!("should never be hit due to validation"),
+            }
         }
+
+        for (pane_config, idx) in config.panes.iter().zip(0..config.panes.len()).into_iter() {
+            let border = match &pane_config.border {
+                Some(settings) => match (&settings.preset, &settings.custom) {
+                    (Some(preset), None) => preset.to_characters(),
+                    (None, Some(custom)) => *custom,
+                    _ => unreachable!("should never be hit due to validation"),
+                },
+                None => BorderCharacters::ascii(),
+            };
+
+            let pane = TerminalPane::new(
+                resolve_absolute(pane_config.frame.x.clone(), self.sequencer.term_width),
+                resolve_absolute(pane_config.frame.y.clone(), self.sequencer.term_height),
+                resolve_absolute(pane_config.frame.width.clone(), self.sequencer.term_width),
+                resolve_absolute(pane_config.frame.height.clone(), self.sequencer.term_height),
+                pane_config.name.clone(),
+                Some(border),
+                pane_config.initial_text.clone(),
+            );
+
+            self.add_pane(pane);
+        }
+
+        self.on_change();
 
         Ok(())
     }

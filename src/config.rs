@@ -11,7 +11,7 @@ use serde_json::Value;
 #[allow(non_camel_case_types)]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
-struct BorderSettings {
+pub struct BorderSettings {
     preset: Option<BorderPreset>,
     custom: Option<BorderCharacters>,
 }
@@ -27,7 +27,7 @@ impl Default for BorderSettings {
 
 #[allow(non_camel_case_types)]
 #[derive(Clone, Debug, Serialize, Deserialize)]
-enum BorderPreset {
+pub enum BorderPreset {
     rounded,
     ascii,
 }
@@ -45,7 +45,7 @@ impl BorderPreset {
 /// The six characters used to draw a border around a surface.
 #[pub_fields]
 #[allow(dead_code)]
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
 pub struct BorderCharacters {
     top_left: char,
     top_right: char,
