@@ -95,11 +95,28 @@ pub struct Frame {
 #[pub_fields]
 #[allow(dead_code)]
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
+pub struct PythonSettings {
+    code: String,
+}
+
+#[pub_fields]
+#[allow(dead_code)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+pub struct DynamicText {
+    refresh_millis: Option<u64>,
+    python: Option<PythonSettings>,
+    // more ...
+}
+
+#[pub_fields]
+#[allow(dead_code)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct TerminalUIPaneConfig {
     name: String,
     frame: Frame,
     border: Option<BorderSettings>,
     initial_text: Option<String>,
+    dynamic_text: Option<DynamicText>,
 }
 
 #[pub_fields]
@@ -231,6 +248,29 @@ impl TerminalUIConfigValidator {
         Ok(())
     }
 
+    fn validate_pane_dynamic_text_settings(
+        &mut self,
+        idx: usize,
+        pane: &TerminalUIPaneConfig,
+    ) -> Result<()> {
+        match &pane.dynamic_text {
+            Some(dynamic_text) => match &dynamic_text.python {
+                Some(python) => {
+                    if python.code.is_empty() {
+                        return Err(InvalidConfig {
+                            value_ptr: format!("/config/panes/{idx}/dynamic_text/python/code"),
+                            message: "may not have empty python code".into(),
+                        });
+                    }
+                }
+                None => {}
+            },
+            None => {}
+        }
+
+        Ok(())
+    }
+
     fn validate_toplevel(&mut self, config: &TerminalUIConfig) -> Result<()> {
         if config.name.is_empty() {
             return Err(InvalidConfig {
@@ -259,6 +299,7 @@ impl TerminalUIConfigValidator {
 
         self.validate_pane_frame(idx, pane)?;
         self.validate_pane_border_settings(idx, pane)?;
+        self.validate_pane_dynamic_text_settings(idx, pane)?;
 
         Ok(())
     }

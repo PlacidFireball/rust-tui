@@ -106,7 +106,7 @@ impl TerminalUI {
         Ok(())
     }
 
-    pub fn running_loop(&mut self) {
+    pub async fn running_loop(&mut self) -> Result<()> {
         // Register SIGWINCH handler
         unsafe {
             libc::signal(
@@ -115,9 +115,11 @@ impl TerminalUI {
             );
         }
 
+        for pane in self.renderer.get_panes() {}
+
         loop {
             if RESIZED.swap(false, Ordering::Relaxed) {
-                self.resize();
+                self.resize()?;
             }
             std::thread::sleep(Duration::from_millis(100));
         }

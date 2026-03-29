@@ -230,19 +230,23 @@ impl TerminalRenderer {
     fn render(&mut self) {
         eprintln!("render");
         for surface in self.panes.clone() {
-            self.render_surface(surface);
+            self.render_pane(surface);
         }
         std::io::stdout().flush().expect("failure to flush stdout");
     }
 
-    fn render_surface(&mut self, pane: TerminalPane) {
+    fn render_pane(&mut self, pane: TerminalPane) {
         eprintln!("render_surface: {:?}", pane);
         let lines = pane.render_lines();
         for (i, line) in lines.iter().enumerate() {
             self.sequencer
                 .set_cursor_position(pane.pos_x, pane.pos_y + i);
-            print!("{line}")
+            print!("{line}");
         }
+    }
+
+    pub fn get_panes(&self) -> &Vec<TerminalPane> {
+        return &self.panes;
     }
 
     pub fn on_change(&mut self) {

@@ -9,3 +9,5 @@ libc = "*"
 serde = { version = "*", features = ["derive"] }
 serde_json = "*"
 clap = { version = "*", features = ["derive"] }
+tokio = { version = "1.50.0", features = ["full"] }
+pyo3 = "0.28.2"
