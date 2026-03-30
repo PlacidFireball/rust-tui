@@ -12,7 +12,11 @@
       "border": {
         "preset": "rounded"
       },
-      "initial_text": "Hello, World!"
+      "dynamic_text": {
+        "python": {
+          "code": "print(\"Hello from Python!\")"
+        }
+      }
     },
     {
       "name": "Right Pane",

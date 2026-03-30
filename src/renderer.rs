@@ -1,4 +1,7 @@
-use std::io::Write;
+use std::{
+    io::Write,
+    sync::{Arc, Mutex},
+};
 
 pub enum RendererError {}
 
@@ -6,8 +9,10 @@ type Result<T> = std::result::Result<T, RendererError>;
 
 use serde_json::Value;
 
+type SharedPane = Arc<Mutex<TerminalPane>>;
+
 use crate::{
-    config::{BorderCharacters, TerminalUIConfig},
+    config::{BorderCharacters, DynamicText, TerminalUIConfig},
     sequencer::EscapeSequencer,
 };
 
@@ -23,8 +28,9 @@ pub struct TerminalPane {
 
     /// Raw wrapped content lines, without any border decoration.
     lines: Vec<String>,
-    /// Active border style, if any.
     border: Option<BorderCharacters>,
+
+    pub dynamic_text: Option<DynamicText>,
 }
 #[allow(dead_code, unused)]
 impl TerminalPane {
@@ -36,6 +42,7 @@ impl TerminalPane {
         id: String,
         border: Option<BorderCharacters>,
         initial_text: Option<String>,
+        dynamic_text: Option<DynamicText>,
     ) -> Self {
         let mut pane = TerminalPane {
             pos_x,
@@ -44,7 +51,8 @@ impl TerminalPane {
             height,
             id,
             lines: vec![],
-            border: border,
+            border,
+            dynamic_text,
         };
 
         match initial_text {
@@ -103,6 +111,7 @@ impl TerminalPane {
     /// or use `set_border` to update the style independently.
     pub fn set_text(&mut self, text: String) {
         // Content width: shrink by 2 when a border is active (one column each side).
+        eprintln!("set_text -- text: {text}");
         let content_width = match &self.border {
             Some(_) => self.width.saturating_sub(2),
             None => self.width,
@@ -210,8 +219,8 @@ impl TerminalPane {
 
 #[allow(dead_code, unused)]
 pub struct TerminalRenderer {
-    pub sequencer: EscapeSequencer,
-    panes: Vec<TerminalPane>,
+    sequencer: EscapeSequencer,
+    panes: Vec<SharedPane>,
 }
 
 #[allow(dead_code, unused)]
@@ -224,7 +233,7 @@ impl TerminalRenderer {
     }
 
     pub fn add_pane(&mut self, pane: TerminalPane) {
-        self.panes.push(pane);
+        self.panes.push(Arc::new(Mutex::new(pane)));
     }
 
     fn render(&mut self) {
@@ -235,9 +244,13 @@ impl TerminalRenderer {
         std::io::stdout().flush().expect("failure to flush stdout");
     }
 
-    fn render_pane(&mut self, pane: TerminalPane) {
-        eprintln!("render_surface: {:?}", pane);
+    fn render_pane(&mut self, shared_pane: SharedPane) {
+        eprintln!("render_surface: {:?}", shared_pane);
+
+        let pane = shared_pane.lock().expect("failure to get the lock on pane");
+
         let lines = pane.render_lines();
+
         for (i, line) in lines.iter().enumerate() {
             self.sequencer
                 .set_cursor_position(pane.pos_x, pane.pos_y + i);
@@ -245,7 +258,7 @@ impl TerminalRenderer {
         }
     }
 
-    pub fn get_panes(&self) -> &Vec<TerminalPane> {
+    pub fn get_panes(&self) -> &Vec<SharedPane> {
         return &self.panes;
     }
 
@@ -261,10 +274,16 @@ impl TerminalRenderer {
     ) {
         let mut found = false;
         for i in 0..self.panes.len() {
-            if self.panes[i].id == id {
-                found = true;
-                self.panes[i] = callback(self.panes[i].clone());
-                eprintln!("updated surface: {:?}", self.panes[i]);
+            {
+                let mut shared_pane = self.panes[i].lock().expect("failure to get lock on pane");
+                if shared_pane.id == id {
+                    found = true;
+                    let modified = callback(shared_pane.clone());
+                    *shared_pane = modified;
+                    eprintln!("updated surface: {:?}", self.panes[i]);
+                }
+            }
+            if found {
                 break;
             }
         }
@@ -311,6 +330,7 @@ impl TerminalRenderer {
                 pane_config.name.clone(),
                 Some(border),
                 pane_config.initial_text.clone(),
+                pane_config.dynamic_text.clone(),
             );
 
             self.add_pane(pane);

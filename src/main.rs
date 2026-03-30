@@ -3,9 +3,6 @@ pub(crate) mod renderer;
 pub(crate) mod sequencer;
 pub(crate) mod ui;
 
-#[allow(unused_imports)]
-use ::pyo3::prelude::*;
-
 use crate::ui::TerminalUI;
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 16)]

@@ -5,9 +5,9 @@ edition = "2024"
 
 [dependencies]
 pub-fields-macro = { path = "pub-fields-macro" }
-libc = "*"
-serde = { version = "*", features = ["derive"] }
-serde_json = "*"
-clap = { version = "*", features = ["derive"] }
+libc = { version = "0.2.183" }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = { version = "1.0.149" }
+clap = { version = "4.6.0", features = ["derive"] }
 tokio = { version = "1.50.0", features = ["full"] }
-pyo3 = "0.28.2"
+pyo3 = { version = "0.28.2", features = ["auto-initialize"] }

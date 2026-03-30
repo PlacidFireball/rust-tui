@@ -150,6 +150,7 @@ pub enum AnsiCode {
 }
 
 impl AnsiCode {
+    #[allow(dead_code)]
     pub fn as_str(&self) -> String {
         match self {
             AnsiCode::Reset => "\x1b[0m".into(),
