@@ -3,8 +3,10 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+#[allow(unused)]
 pub enum RendererError {}
 
+#[allow(unused)]
 type Result<T> = std::result::Result<T, RendererError>;
 
 use serde_json::Value;
@@ -225,6 +227,7 @@ pub struct TerminalRenderer {
 
 #[allow(dead_code, unused)]
 impl TerminalRenderer {
+    /// Creates a new [`TerminalRenderer`].
     pub fn new(sequencer: EscapeSequencer) -> Self {
         TerminalRenderer {
             sequencer,
@@ -236,15 +239,39 @@ impl TerminalRenderer {
         self.panes.push(Arc::new(Mutex::new(pane)));
     }
 
-    fn render(&mut self) {
-        eprintln!("render");
-        for surface in self.panes.clone() {
-            self.render_pane(surface);
+    /// Render the TUI. Specify a pane ID to only reander that pane.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a lock on a pane cannot be retrieved.
+    fn render(&mut self, id: Option<String>) {
+        eprintln!("render -- pane_id: {id:?}");
+        match id {
+            Some(pane_id) => {
+                for shared_pane in self.panes.clone() {
+                    {
+                        let pane = shared_pane.lock().expect("failure to get lock on pane");
+                        if pane.id == pane_id {
+                            self.render_pane_locked(&pane);
+                        }
+                    }
+                }
+            }
+            None => {
+                for pane in self.panes.clone() {
+                    self.render_pane_unlocked(pane);
+                }
+            }
         }
         std::io::stdout().flush().expect("failure to flush stdout");
     }
 
-    fn render_pane(&mut self, shared_pane: SharedPane) {
+    /// Render a terminal pane, and you haven't already acquired the lock.
+    ///
+    /// # Panics
+    ///
+    /// Panics if this thread cannot get the lock on the pane.
+    fn render_pane_unlocked(&mut self, shared_pane: SharedPane) {
         eprintln!("render_surface: {:?}", shared_pane);
 
         let pane = shared_pane.lock().expect("failure to get the lock on pane");
@@ -258,13 +285,24 @@ impl TerminalRenderer {
         }
     }
 
+    /// Render a terminal pane, and you have the lock on the pane.
+    fn render_pane_locked(&mut self, pane: &TerminalPane) {
+        let lines = pane.render_lines();
+
+        for (i, line) in lines.iter().enumerate() {
+            self.sequencer
+                .set_cursor_position(pane.pos_x, pane.pos_y + i);
+            print!("{line}");
+        }
+    }
+
     pub fn get_panes(&self) -> &Vec<SharedPane> {
         return &self.panes;
     }
 
-    pub fn on_change(&mut self) {
-        eprintln!("on_change");
-        self.render();
+    pub fn on_change(&mut self, pane_id: Option<String>) {
+        eprintln!("on_change -- pane_id: {pane_id:?}");
+        self.render(pane_id);
     }
 
     pub fn update_pane<T: FnMut(TerminalPane) -> TerminalPane>(
@@ -278,8 +316,7 @@ impl TerminalRenderer {
                 let mut shared_pane = self.panes[i].lock().expect("failure to get lock on pane");
                 if shared_pane.id == id {
                     found = true;
-                    let modified = callback(shared_pane.clone());
-                    *shared_pane = modified;
+                    *shared_pane = callback(shared_pane.clone());
                     eprintln!("updated surface: {:?}", self.panes[i]);
                 }
             }
@@ -288,11 +325,12 @@ impl TerminalRenderer {
             }
         }
         if found {
-            self.on_change();
+            self.on_change(Some(id));
         }
     }
 
-    pub fn with_config(&mut self, config: &TerminalUIConfig) -> Result<()> {
+    /// Clears the current pane array and loads the config into the renderer.
+    pub fn with_config(&mut self, config: &TerminalUIConfig) {
         fn resolve_absolute(value: Value, term_dim: usize) -> usize {
             match value {
                 Value::Number(number) => {
@@ -311,6 +349,8 @@ impl TerminalRenderer {
                 _ => unreachable!("should never be hit due to validation"),
             }
         }
+
+        self.panes.clear();
 
         for (pane_config, idx) in config.panes.iter().zip(0..config.panes.len()).into_iter() {
             let border = match &pane_config.border {
@@ -336,9 +376,7 @@ impl TerminalRenderer {
             self.add_pane(pane);
         }
 
-        self.on_change();
-
-        Ok(())
+        self.on_change(None);
     }
 
     pub fn on_resize(&mut self, term_width: usize, term_height: usize) {

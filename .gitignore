@@ -3,3 +3,4 @@ pub-fields-macro/target
 
 *.log
 AGENTS.md
+*.py

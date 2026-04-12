@@ -127,12 +127,8 @@ impl TerminalUI {
         let mut config_validator = TerminalUIConfigValidator::new(term_width, term_height);
         config_validator.validate(&config)?;
 
-        match renderer.with_config(&config) {
-            Ok(_) => {} // yey
-            Err(e) => match e {},
-        };
-
         renderer.clear_screen();
+        renderer.with_config(&config);
 
         Ok(TerminalUI {
             renderer: Arc::new(Mutex::new(renderer)),

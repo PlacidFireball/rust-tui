@@ -26,7 +26,7 @@ impl Default for BorderSettings {
 }
 
 #[allow(non_camel_case_types)]
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, Copy)]
 pub enum BorderPreset {
     rounded,
     ascii,
@@ -232,15 +232,16 @@ impl TerminalUIConfigValidator {
     ) -> Result<()> {
         match &pane.border {
             Some(border_settings) => {
-                if (border_settings.preset.is_none() && border_settings.custom.is_none())
-                    || (border_settings.preset.is_some() && border_settings.custom.is_some())
-                {
-                    return Err(InvalidConfig {
-                        value_ptr: format!("/config/panes/{idx}/border"),
-                        message: format!(
-                            "define border.preset OR border.custom - config is ambigious as is"
-                        ),
-                    });
+                match (border_settings.preset, border_settings.custom) {
+                    (Some(_), Some(_)) | (None, None) => {
+                        return Err(InvalidConfig {
+                            value_ptr: format!("/config/panes/{idx}/border"),
+                            message: format!(
+                                "define border.preset OR border.custom - config is ambigious as is"
+                            ),
+                        });
+                    }
+                    _ => {}
                 }
             }
             None => {}
