@@ -2,6 +2,7 @@ pub(crate) mod config;
 pub(crate) mod renderer;
 pub(crate) mod sequencer;
 pub(crate) mod ui;
+pub(crate) mod util;
 
 use crate::ui::TerminalUI;
 

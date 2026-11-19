@@ -1,20 +1,19 @@
 use std::{
-    ffi::CString,
-    sync::{
-        Arc, Mutex,
-        atomic::{AtomicBool, Ordering},
-    },
-    time::Duration,
+    collections::VecDeque, ffi::CString, io::Read, sync::{
+        Arc, Mutex, RwLock, atomic::{AtomicBool, Ordering}
+    }, time::Duration
 };
 
 use crate::{
     config::{TerminalUIConfig, TerminalUIConfigValidator},
     renderer::TerminalRenderer,
-    sequencer::EscapeSequencer,
+    sequencer::EscapeSequencer, util,
 };
+use pub_fields_macro::pub_fields;
 use pyo3::ffi::c_str;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
+use termion::{event::{Event, Key}, input::TermRead};
 
 static RESIZED: AtomicBool = AtomicBool::new(false);
 extern "C" fn handle_sigwinch(_: libc::c_int) {
@@ -30,6 +29,102 @@ pub enum TerminalUIError {
 }
 use TerminalUIError::*;
 use tokio::task::JoinHandle;
+
+#[pub_fields]
+#[derive(Debug, Clone, PartialEq)]
+struct TerminalUIInputEvent {
+    c: Option<char>,
+    function: Option<u8>,
+    key: Option<Key>,
+
+    ctrl: bool,
+    alt: bool,
+    shift: bool,
+}
+impl From<Key> for TerminalUIInputEvent {
+    fn from(key: Key) -> Self {
+        match key {
+            /* --- Characters --- */
+            Key::Char(c) => TerminalUIInputEvent::new_char(c, false, false),
+            Key::Up => TerminalUIInputEvent::new_key(Key::Up, false, false, false),
+            Key::Down => TerminalUIInputEvent::new_key(Key::Down, false, false, false),
+            Key::Left => TerminalUIInputEvent::new_key(Key::Left, false, false, false),
+            Key::Right => TerminalUIInputEvent::new_key(Key::Right, false, false, false),
+
+            Key::PageUp => TerminalUIInputEvent::new_key(Key::PageUp, false, false, false),
+            Key::PageDown => TerminalUIInputEvent::new_key(Key::PageDown, false, false, false),
+
+            // TODO: what if ctrl+alt?
+
+            /* --- Ctrl --- */
+            Key::Ctrl(c) => TerminalUIInputEvent::new_char(c, true, false),
+            Key::CtrlUp => TerminalUIInputEvent::new_key(Key::CtrlUp, true, false, false),
+            Key::CtrlDown => TerminalUIInputEvent::new_key(Key::CtrlDown, true, false, false),
+            Key::CtrlLeft => TerminalUIInputEvent::new_key(Key::CtrlLeft, true, false, false),
+            Key::CtrlRight => TerminalUIInputEvent::new_key(Key::CtrlRight, true, false, false),
+            Key::CtrlHome => TerminalUIInputEvent::new_key(Key::CtrlHome, true, false, false),
+            Key::CtrlEnd => TerminalUIInputEvent::new_key(Key::CtrlEnd, true, false, false),
+
+            /* --- Alt --- */
+            Key::Alt(c) => TerminalUIInputEvent::new_char(c, false, true),
+            Key::AltUp => TerminalUIInputEvent::new_key(Key::AltUp, false, true, false),
+            Key::AltDown => TerminalUIInputEvent::new_key(Key::AltDown, false, true, false),
+            Key::AltLeft => TerminalUIInputEvent::new_key(Key::AltLeft, false, true, false),
+            Key::AltRight => TerminalUIInputEvent::new_key(Key::AltRight, false, true, false),
+
+            /* --- Shift --- */
+            Key::ShiftUp => TerminalUIInputEvent::new_key(Key::ShiftUp, false, false, true),
+            Key::ShiftDown => TerminalUIInputEvent::new_key(Key::ShiftDown, false, false, true),
+            Key::ShiftRight => TerminalUIInputEvent::new_key(Key::ShiftRight, false, false, true),
+            Key::ShiftLeft => TerminalUIInputEvent::new_key(Key::ShiftLeft, false, false, true),
+
+            Key::Backspace => TerminalUIInputEvent::new_key(Key::Backspace, false, false, false),
+            Key::Home => TerminalUIInputEvent::new_key(Key::Home, false, false, false),
+            Key::End => TerminalUIInputEvent::new_key(Key::End, false, false, false),
+            Key::BackTab => TerminalUIInputEvent::new_key(Key::BackTab, false, false, false),
+            Key::Delete => TerminalUIInputEvent::new_key(Key::Delete, false, false, false),
+            Key::Insert => TerminalUIInputEvent::new_key(Key::Insert, false, false, false),
+            Key::F(n) => TerminalUIInputEvent::new_function(n),
+            Key::Null => TerminalUIInputEvent::new_key(Key::Null, false, false, false),
+            Key::Esc => TerminalUIInputEvent::new_key(Key::Esc, false, false, false),
+            _ => unreachable!("__NotComplete? {key:?}")
+        }
+    }
+}
+impl TerminalUIInputEvent {
+    pub fn new_function(n: u8) -> Self {
+        Self {
+            c: None,
+            function: Some(n),
+            key: None,
+            ctrl: false,
+            alt: false,
+            shift: false,
+        }
+    }
+
+    pub fn new_char(c: char, ctrl: bool, alt: bool) -> Self {
+        Self {
+            c: Some(c),
+            function: None,
+            key: None,
+            ctrl,
+            alt,
+            shift: c.is_uppercase(),
+        }
+    }
+
+    pub fn new_key(k: Key, ctrl: bool, alt: bool, shift: bool) -> Self {
+        Self {
+            c: None,
+            function: None,
+            key: Some(k),
+            ctrl,
+            alt,
+            shift,
+        }
+    }
+}
 
 /// Installs a thread-local `sys.stdout` redirector into the Python interpreter.
 /// Must be called once before any threads execute Python code.
@@ -88,34 +183,15 @@ impl TerminalUI {
         }
     }
 
-    /// Redirects stderr to `debug.log` so `eprintln!` traces never bleed into
-    /// the terminal UI. Safe to call multiple times; subsequent calls are no-ops
-    /// if the file cannot be opened.
-    fn redirect_stderr() {
-        unsafe {
-            let path = b"debug.log\0";
-            let fd = libc::open(
-                path.as_ptr() as *const libc::c_char,
-                libc::O_WRONLY | libc::O_CREAT | libc::O_TRUNC,
-                0o644,
-            );
-            if fd >= 0 {
-                libc::dup2(fd, libc::STDERR_FILENO);
-                libc::close(fd);
-            }
-        }
-    }
-
     pub fn from_config(config_path: &str) -> Result<Self> {
-        Self::redirect_stderr();
-        let config_raw: String = match std::fs::read_to_string(config_path) {
-            Ok(s) => s,
-            Err(_) => return Err(ConfigMissing),
-        };
+        util::redirect_stderr();
 
-        let config: TerminalUIConfig = match serde_json::from_str(&config_raw) {
-            Ok(c) => c,
-            Err(_) => return Err(InvalidJson),
+        let config: TerminalUIConfig = match std::fs::File::open(config_path) {
+            Ok(file) => match serde_json::from_reader(file) {
+                Ok(config) => config,
+                Err(_) => return Err(InvalidJson), 
+            },
+            Err(_) => return Err(ConfigMissing),
         };
 
         println!("{config:?}");
@@ -198,6 +274,9 @@ impl TerminalUI {
 
         let mut first_python_dynamic_task = true;
 
+        let input_queue: Arc<RwLock<VecDeque<TerminalUIInputEvent>>> = Arc::new(RwLock::new(VecDeque::new()));
+        let new_input_arrived: AtomicBool = AtomicBool::new(false);
+
         for shared_pane in self
             .renderer
             .lock()
@@ -230,6 +309,46 @@ impl TerminalUI {
         }
 
         loop {
+            async fn gather_input_event(input_queue: Arc<RwLock<VecDeque<TerminalUIInputEvent>>>) {
+                let write = |evt| {
+                    match input_queue.write() {
+                        Ok(mut write) => write.push_back(evt),
+                        Err(e) => panic!("poisoned write lock - e: {e}"),
+                    };
+                };
+                for evt_res in std::io::stdin().events() {
+                    match evt_res {
+                        Ok(evt) => match evt {
+                            Event::Key(key) => write(key.into()),
+                            Event::Mouse(mouse_event) => {
+                                eprintln!("mouse event received: {mouse_event:?}")
+                            },
+                            Event::Unsupported(_items) => todo!(),
+                        },
+                        Err(e) => eprintln!("Error reading from stdin: {e}")
+                    }
+                }
+            }
+
+            async fn process_input_event(input_queue: Arc<RwLock<VecDeque<TerminalUIInputEvent>>>) {
+                let event: Option<TerminalUIInputEvent> = match input_queue.write() {
+                    Ok(mut queue) => {
+                        queue.pop_front()
+                    }
+                    Err(e) => panic!("poisoned write lock - e: {e}"),
+                };
+
+                match event {
+                    Some(event) => {
+                        eprintln!("received event {event:?}");
+                    },
+                    _ => {},
+                }
+            }
+
+            let _gather_input_event_handle = tokio::spawn(gather_input_event(input_queue.clone()));
+            let _process_input_event_handle = tokio::spawn(process_input_event(input_queue.clone()));
+
             if RESIZED.swap(false, Ordering::Relaxed) {
                 self.resize()?;
             }

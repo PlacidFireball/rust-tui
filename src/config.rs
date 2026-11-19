@@ -30,6 +30,7 @@ impl Default for BorderSettings {
 pub enum BorderPreset {
     rounded,
     ascii,
+    none,
 }
 
 #[allow(dead_code)]
@@ -38,6 +39,7 @@ impl BorderPreset {
         match self {
             Self::rounded => BorderCharacters::rounded(),
             Self::ascii => BorderCharacters::ascii(),
+            Self::none => BorderCharacters::none(),
         }
     }
 }
@@ -80,6 +82,18 @@ impl BorderCharacters {
             horizontal: '-',
         }
     }
+
+    pub fn none() -> Self {
+        BorderCharacters {
+            top_left: ' ',
+            top_right: ' ',
+            bottom_left: ' ',
+            bottom_right: ' ',
+            left: ' ',
+            right: ' ',
+            horizontal: ' ',
+        }
+    }
 }
 
 #[pub_fields]
@@ -102,9 +116,18 @@ pub struct PythonSettings {
 #[pub_fields]
 #[allow(dead_code)]
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
+pub struct LuaSettings {
+    code: Option<String>,
+    script: Option<String>,
+}
+
+#[pub_fields]
+#[allow(dead_code)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct DynamicText {
     refresh_millis: Option<u64>,
     python: Option<PythonSettings>,
+    lua: Option<LuaSettings>
     // more ...
 }
 
@@ -117,6 +140,38 @@ pub struct TerminalUIPaneConfig {
     border: Option<BorderSettings>,
     initial_text: Option<String>,
     dynamic_text: Option<DynamicText>,
+}
+
+#[allow(dead_code)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+pub enum KeySeq {
+    Character { ctrl: bool, alt: bool, char: char },
+    Function { n: u8 },
+    OtherKey { key: String },
+    #[default]
+    NoKey,
+}
+
+#[pub_fields]
+#[allow(dead_code)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+pub struct KeyChord {
+    keys: Vec<KeySeq>
+}
+
+#[allow(dead_code)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+pub enum TerminalUIAction {
+
+    #[default]
+    Nothing,
+}
+
+#[allow(dead_code)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub enum TerminalUIBinding {
+    KeyChordBinding { chord: KeyChord, action: TerminalUIAction },
+    KeyBinding { key: KeySeq, action: TerminalUIAction },
 }
 
 #[pub_fields]
