@@ -1,6 +1,9 @@
 /target
 pub-fields-macro/target
 
-*.log
 AGENTS.md
+CLAUDE.md
+
+*.log
 *.py
+*.lua

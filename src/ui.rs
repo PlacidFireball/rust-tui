@@ -1,18 +1,17 @@
 use std::{
-    collections::VecDeque, ffi::CString, io::Read, sync::{
+    collections::VecDeque, io::Read, sync::{
         Arc, Mutex, RwLock, atomic::{AtomicBool, Ordering}
     }, time::Duration
 };
 
 use crate::{
-    config::{TerminalUIConfig, TerminalUIConfigValidator},
+    config::{LuaSettings, PythonSettings, TerminalUIConfig, TerminalUIConfigValidator},
+    lua::LuaPaneRuntime,
+    python::PythonPaneRuntime,
     renderer::TerminalRenderer,
     sequencer::EscapeSequencer, util,
 };
 use pub_fields_macro::pub_fields;
-use pyo3::ffi::c_str;
-use pyo3::prelude::*;
-use pyo3::types::PyDict;
 use termion::{event::{Event, Key}, input::TermRead};
 
 static RESIZED: AtomicBool = AtomicBool::new(false);
@@ -126,35 +125,6 @@ impl TerminalUIInputEvent {
     }
 }
 
-/// Installs a thread-local `sys.stdout` redirector into the Python interpreter.
-/// Must be called once before any threads execute Python code.
-/// After this, each thread must set `sys.stdout._local.buffer = io.StringIO()`
-/// before running code and call `sys.stdout._local.buffer.getvalue()` to retrieve output.
-fn install_thread_local_stdout() {
-    Python::attach(|py| {
-        py.run(
-            c_str!(
-                "import sys, io, threading
-
-class _ThreadLocalStdout:
-    def __init__(self):
-        self._local = threading.local()
-    def write(self, s):
-        buf = getattr(self._local, 'buffer', None)
-        if buf is not None:
-            buf.write(s)
-    def flush(self): pass
-
-sys.stdout = _ThreadLocalStdout()
-"
-            ),
-            None,
-            None,
-        )
-        .expect("failed to install thread-local stdout redirector");
-    });
-}
-
 pub(crate) type Result<T> = std::result::Result<T, TerminalUIError>;
 
 #[allow(dead_code)]
@@ -219,47 +189,31 @@ impl TerminalUI {
         Ok(())
     }
 
-    fn spawn_dynamic_python_text_task(
-        code: String,
+    fn spawn_dynamic_python_task(
+        python_settings: PythonSettings,
+        refresh_millis: Option<u64>,
         pane_id: String,
         renderer_ref: Arc<Mutex<TerminalRenderer>>,
     ) -> Option<JoinHandle<()>> {
-        // TODO: if refresh duration, schedule a recurring task
         Some(tokio::spawn(async move {
-            Python::attach(|py| {
-                let code_cstring = CString::new(code.as_str()).expect("code has null byte");
+            match PythonPaneRuntime::new(python_settings, pane_id.clone(), renderer_ref) {
+                Ok(runtime) => runtime.run_on_schedule(refresh_millis).await,
+                Err(e) => eprintln!("failed to start python runtime for pane {pane_id}: {e}"),
+            }
+        }))
+    }
 
-                // Point this thread's buffer at a fresh StringIO.
-                py.run(
-                    c_str!("import sys, io\nsys.stdout._local.buffer = io.StringIO()\n"),
-                    None,
-                    None,
-                )
-                .expect("failed to set thread-local stdout buffer");
-
-                let locals = PyDict::new(py);
-                let result = py.run(code_cstring.as_c_str(), None, Some(&locals));
-
-                let output: String = py
-                    .eval(c_str!("sys.stdout._local.buffer.getvalue()"), None, None)
-                    .and_then(|v| v.extract::<String>())
-                    .unwrap_or_default();
-
-                match result {
-                    Ok(_) => {
-                        let mut renderer =
-                            renderer_ref.lock().expect("failure to get renderer lock");
-
-                        renderer.update_pane(pane_id, |mut pane| {
-                            pane.set_text(output.clone());
-                            pane
-                        });
-                    }
-                    Err(e) => {
-                        eprintln!("python error {e:?}")
-                    }
-                }
-            })
+    fn spawn_dynamic_lua_task(
+        lua_settings: LuaSettings,
+        refresh_millis: Option<u64>,
+        pane_id: String,
+        renderer_ref: Arc<Mutex<TerminalRenderer>>,
+    ) -> Option<JoinHandle<()>> {
+        Some(tokio::spawn(async move {
+            match LuaPaneRuntime::new(pane_id.clone(), renderer_ref) {
+                Ok(runtime) => runtime.run_on_schedule(&lua_settings, refresh_millis).await,
+                Err(e) => eprintln!("failed to start lua runtime for pane {pane_id}: {e}"),
+            }
         }))
     }
 
@@ -272,10 +226,8 @@ impl TerminalUI {
             );
         }
 
-        let mut first_python_dynamic_task = true;
-
         let input_queue: Arc<RwLock<VecDeque<TerminalUIInputEvent>>> = Arc::new(RwLock::new(VecDeque::new()));
-        let new_input_arrived: AtomicBool = AtomicBool::new(false);
+        let _new_input_arrived: AtomicBool = AtomicBool::new(false);
 
         for shared_pane in self
             .renderer
@@ -287,49 +239,54 @@ impl TerminalUI {
                 let pane = shared_pane.lock().expect("failure to get lock on pane");
 
                 let _join_handle_opt = match &pane.dynamic_text {
-                    Some(dynamic_text) => match &dynamic_text.python {
-                        Some(python) => {
-                            if first_python_dynamic_task {
-                                // install a thead-local stdout so that different python
-                                // invocations don't clobber each other
-                                install_thread_local_stdout();
-                                first_python_dynamic_task = false;
-                            }
-                            Self::spawn_dynamic_python_text_task(
-                                python.code.clone(),
-                                pane.id.clone(),
-                                self.renderer.clone(),
-                            )
-                        }
-                        None => None,
+                    Some(dynamic_text) => match (&dynamic_text.python, &dynamic_text.lua) {
+                        (Some(python), None) => Self::spawn_dynamic_python_task(
+                            python.clone(),
+                            dynamic_text.refresh_millis,
+                            pane.id.clone(),
+                            self.renderer.clone(),
+                        ),
+                        (None, Some(lua_settings)) => Self::spawn_dynamic_lua_task(
+                            lua_settings.clone(),
+                            dynamic_text.refresh_millis,
+                            pane.id.clone(),
+                            self.renderer.clone(),
+                        ),
+                        (None, None) => None,
+                        (Some(_), Some(_)) => unreachable!("should never be hit due to validation"),
                     },
                     None => None,
                 };
             }
         }
 
-        loop {
-            async fn gather_input_event(input_queue: Arc<RwLock<VecDeque<TerminalUIInputEvent>>>) {
-                let write = |evt| {
-                    match input_queue.write() {
-                        Ok(mut write) => write.push_back(evt),
-                        Err(e) => panic!("poisoned write lock - e: {e}"),
-                    };
+        // TODO: this can't be cancelled; it holds a blocking-pool thread until the process exits
+        fn gather_input_event(input_queue: Arc<RwLock<VecDeque<TerminalUIInputEvent>>>) {
+            let write = |evt| {
+                match input_queue.write() {
+                    Ok(mut write) => write.push_back(evt),
+                    Err(e) => panic!("poisoned write lock - e: {e}"),
                 };
-                for evt_res in std::io::stdin().events() {
-                    match evt_res {
-                        Ok(evt) => match evt {
-                            Event::Key(key) => write(key.into()),
-                            Event::Mouse(mouse_event) => {
-                                eprintln!("mouse event received: {mouse_event:?}")
-                            },
-                            Event::Unsupported(_items) => todo!(),
+            };
+            for evt_res in std::io::stdin().events() {
+                match evt_res {
+                    Ok(evt) => match evt {
+                        Event::Key(key) => write(key.into()),
+                        Event::Mouse(mouse_event) => {
+                            eprintln!("mouse event received: {mouse_event:?}")
                         },
-                        Err(e) => eprintln!("Error reading from stdin: {e}")
-                    }
+                        Event::Unsupported(_items) => todo!(),
+                    },
+                    Err(e) => eprintln!("Error reading from stdin: {e}")
                 }
             }
+        }
 
+        let gather_input_queue = input_queue.clone();
+        let _gather_input_event_handle =
+            tokio::task::spawn_blocking(move || gather_input_event(gather_input_queue));
+
+        loop {
             async fn process_input_event(input_queue: Arc<RwLock<VecDeque<TerminalUIInputEvent>>>) {
                 let event: Option<TerminalUIInputEvent> = match input_queue.write() {
                     Ok(mut queue) => {
@@ -346,7 +303,6 @@ impl TerminalUI {
                 }
             }
 
-            let _gather_input_event_handle = tokio::spawn(gather_input_event(input_queue.clone()));
             let _process_input_event_handle = tokio::spawn(process_input_event(input_queue.clone()));
 
             if RESIZED.swap(false, Ordering::Relaxed) {

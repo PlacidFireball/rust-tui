@@ -110,7 +110,8 @@ pub struct Frame {
 #[allow(dead_code)]
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct PythonSettings {
-    code: String,
+    code: Option<String>,
+    script: Option<String>,
 }
 
 #[pub_fields]
@@ -127,7 +128,7 @@ pub struct LuaSettings {
 pub struct DynamicText {
     refresh_millis: Option<u64>,
     python: Option<PythonSettings>,
-    lua: Option<LuaSettings>
+    lua: Option<LuaSettings>,
     // more ...
 }
 
@@ -309,18 +310,81 @@ impl TerminalUIConfigValidator {
         idx: usize,
         pane: &TerminalUIPaneConfig,
     ) -> Result<()> {
-        match &pane.dynamic_text {
-            Some(dynamic_text) => match &dynamic_text.python {
-                Some(python) => {
-                    if python.code.is_empty() {
+        let dynamic_text = match &pane.dynamic_text {
+            Some(dynamic_text) => dynamic_text,
+            None => return Ok(()),
+        };
+
+        if let Some(0) = dynamic_text.refresh_millis {
+            return Err(InvalidConfig {
+                value_ptr: format!("/config/panes/{idx}/dynamic_text/refresh_millis"),
+                message: "refresh_millis must be greater than 0 - omit it to run once".into(),
+            });
+        }
+
+        if dynamic_text.python.is_some() && dynamic_text.lua.is_some() {
+            return Err(InvalidConfig {
+                value_ptr: format!("/config/panes/{idx}/dynamic_text"),
+                message: "define dynamic_text.python OR dynamic_text.lua - not both".into(),
+            });
+        }
+
+        match &dynamic_text.python {
+            Some(python) => {
+                let python_ptr = format!("/config/panes/{idx}/dynamic_text/python");
+                match (&python.code, &python.script) {
+                    (Some(_), Some(_)) | (None, None) => {
                         return Err(InvalidConfig {
-                            value_ptr: format!("/config/panes/{idx}/dynamic_text/python/code"),
+                            value_ptr: python_ptr,
+                            message:
+                                "define python.code OR python.script - config is ambigious as is"
+                                    .into(),
+                        });
+                    }
+                    (Some(code), None) if code.is_empty() => {
+                        return Err(InvalidConfig {
+                            value_ptr: format!("{python_ptr}/code"),
                             message: "may not have empty python code".into(),
                         });
                     }
+                    (None, Some(script)) if script.is_empty() => {
+                        return Err(InvalidConfig {
+                            value_ptr: format!("{python_ptr}/script"),
+                            message: "may not have empty python script path".into(),
+                        });
+                    }
+                    _ => {}
                 }
-                None => {}
-            },
+            }
+            None => {}
+        }
+
+        match &dynamic_text.lua {
+            Some(lua) => {
+                let lua_ptr = format!("/config/panes/{idx}/dynamic_text/lua");
+                match (&lua.code, &lua.script) {
+                    (Some(_), Some(_)) | (None, None) => {
+                        return Err(InvalidConfig {
+                            value_ptr: lua_ptr,
+                            message: "define lua.code OR lua.script - config is ambigious as is"
+                                .into(),
+                        });
+                    }
+                    (Some(code), None) if code.is_empty() => {
+                        return Err(InvalidConfig {
+                            value_ptr: format!("{lua_ptr}/code"),
+                            message: "may not have empty lua code".into(),
+                        });
+                    }
+                    (None, Some(script)) if script.is_empty() => {
+                        return Err(InvalidConfig {
+                            value_ptr: format!("{lua_ptr}/script"),
+                            message: "may not have empty lua script path".into(),
+                        });
+                    }
+                    _ => {}
+                }
+            }
             None => {}
         }
 
@@ -367,5 +431,133 @@ impl TerminalUIConfigValidator {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn validate_dynamic_text(dynamic_text: Value) -> Result<()> {
+        let config: TerminalUIConfig = serde_json::from_value(serde_json::json!({
+            "name": "test",
+            "panes": [{
+                "name": "pane",
+                "frame": { "width": "100%", "height": "100%", "x": 0, "y": 0 },
+                "dynamic_text": dynamic_text,
+            }],
+        }))
+        .expect("test config should deserialize");
+
+        TerminalUIConfigValidator::new(80, 24).validate(&config)
+    }
+
+    fn assert_invalid_at(result: Result<()>, expected_ptr: &str) {
+        match result {
+            Err(InvalidConfig { value_ptr, .. }) => assert_eq!(value_ptr, expected_ptr),
+            other => panic!("expected InvalidConfig at {expected_ptr}, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn lua_code_is_valid() {
+        let result = validate_dynamic_text(serde_json::json!({
+            "lua": { "code": "ui.set_text('hi')" },
+        }));
+        assert_eq!(result, Ok(()));
+    }
+
+    #[test]
+    fn lua_script_is_valid() {
+        let result = validate_dynamic_text(serde_json::json!({
+            "lua": { "script": "pane.lua" },
+        }));
+        assert_eq!(result, Ok(()));
+    }
+
+    #[test]
+    fn lua_code_and_script_is_invalid() {
+        let result = validate_dynamic_text(serde_json::json!({
+            "lua": { "code": "ui.set_text('hi')", "script": "pane.lua" },
+        }));
+        assert_invalid_at(result, "/config/panes/0/dynamic_text/lua");
+    }
+
+    #[test]
+    fn lua_neither_code_nor_script_is_invalid() {
+        let result = validate_dynamic_text(serde_json::json!({ "lua": {} }));
+        assert_invalid_at(result, "/config/panes/0/dynamic_text/lua");
+    }
+
+    #[test]
+    fn lua_empty_code_is_invalid() {
+        let result = validate_dynamic_text(serde_json::json!({ "lua": { "code": "" } }));
+        assert_invalid_at(result, "/config/panes/0/dynamic_text/lua/code");
+    }
+
+    #[test]
+    fn lua_empty_script_is_invalid() {
+        let result = validate_dynamic_text(serde_json::json!({ "lua": { "script": "" } }));
+        assert_invalid_at(result, "/config/panes/0/dynamic_text/lua/script");
+    }
+
+    #[test]
+    fn python_code_is_valid() {
+        let result = validate_dynamic_text(serde_json::json!({
+            "python": { "code": "ui.set_text('hi')" },
+        }));
+        assert_eq!(result, Ok(()));
+    }
+
+    #[test]
+    fn python_script_is_valid() {
+        let result = validate_dynamic_text(serde_json::json!({
+            "python": { "script": "pane.py" },
+        }));
+        assert_eq!(result, Ok(()));
+    }
+
+    #[test]
+    fn python_code_and_script_is_invalid() {
+        let result = validate_dynamic_text(serde_json::json!({
+            "python": { "code": "ui.set_text('hi')", "script": "pane.py" },
+        }));
+        assert_invalid_at(result, "/config/panes/0/dynamic_text/python");
+    }
+
+    #[test]
+    fn python_neither_code_nor_script_is_invalid() {
+        let result = validate_dynamic_text(serde_json::json!({ "python": {} }));
+        assert_invalid_at(result, "/config/panes/0/dynamic_text/python");
+    }
+
+    #[test]
+    fn python_empty_code_is_invalid() {
+        let result = validate_dynamic_text(serde_json::json!({ "python": { "code": "" } }));
+        assert_invalid_at(result, "/config/panes/0/dynamic_text/python/code");
+    }
+
+    #[test]
+    fn python_empty_script_is_invalid() {
+        let result = validate_dynamic_text(serde_json::json!({ "python": { "script": "" } }));
+        assert_invalid_at(result, "/config/panes/0/dynamic_text/python/script");
+    }
+
+    #[test]
+    fn zero_refresh_millis_is_invalid() {
+        let result = validate_dynamic_text(serde_json::json!({
+            "refresh_millis": 0,
+            "lua": { "code": "ui.set_text('hi')" },
+        }));
+        assert_invalid_at(result, "/config/panes/0/dynamic_text/refresh_millis");
+    }
+
+    #[test]
+    fn python_and_lua_together_is_invalid() {
+        let result = validate_dynamic_text(serde_json::json!({
+            "python": { "code": "ui.set_text('hi')" },
+            "lua": { "code": "ui.set_text('hi')" },
+        }));
+        assert_invalid_at(result, "/config/panes/0/dynamic_text");
     }
 }

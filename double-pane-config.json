@@ -13,8 +13,9 @@
         "preset": "rounded"
       },
       "dynamic_text": {
-        "python": {
-          "code": "print(\"Hello from Python!\")"
+        "refresh_millis": 1000,
+        "lua": {
+          "code": "ui.set_text('Hello, from lua! current unix time: ' .. os.time())"
         }
       }
     },

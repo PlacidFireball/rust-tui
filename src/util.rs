@@ -1,3 +1,7 @@
+use std::time::Duration;
+
+use tokio::time::{Interval, MissedTickBehavior, interval};
+
 /// Redirects stderr to `debug.log` so `eprintln!` traces never bleed into
 /// the terminal UI. Safe to call multiple times; subsequent calls are no-ops
 /// if the file cannot be opened.
@@ -14,4 +18,12 @@ pub(crate) fn redirect_stderr() {
             libc::close(fd);
         }
     }
+}
+
+pub(crate) fn interval_from_millis(millis: Option<u64>) -> Option<Interval> {
+    millis.map(|millis| {
+        let mut refresh = interval(Duration::from_millis(millis));
+        refresh.set_missed_tick_behavior(MissedTickBehavior::Delay);
+        refresh
+    })
 }

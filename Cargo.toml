@@ -5,10 +5,23 @@ edition = "2024"
 
 [dependencies]
 pub-fields-macro = { path = "pub-fields-macro" }
-libc = { version = "0.2.183" }
-serde = { version = "1.0.228", features = ["derive"] }
-serde_json = { version = "1.0.149" }
-clap = { version = "4.6.0", features = ["derive"] }
-tokio = { version = "1.50.0", features = ["full"] }
-pyo3 = { version = "0.29.2", features = ["auto-initialize"] }
+libc = { version = "0.2.191" }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = { version = "1.0.154" }
+clap = { version = "4.6.9", features = ["derive"] }
+tokio = { version = "1.54.1", features = ["full"] }
+pyo3 = { version = "0.30.1", features = ["auto-initialize"] }
 termion = "4.0.6"
+mlua = { version = "0.12.2", features = ["send"] }
+
+[features]
+default = ["luajit"]
+luajit = ["mlua/luajit"]
+lua55 = ["mlua/lua55"]
+lua54 = ["mlua/lua54"]
+lua53 = ["mlua/lua53"]
+lua52 = ["mlua/lua52"]
+lua51 = ["mlua/lua51"]
+
+[dev-dependencies]
+tokio = { version = "1.54.1", features = ["test-util"] }

@@ -1,4 +1,7 @@
 pub(crate) mod config;
+pub(crate) mod lua;
+pub(crate) mod pane_ui;
+pub(crate) mod python;
 pub(crate) mod renderer;
 pub(crate) mod sequencer;
 pub(crate) mod ui;

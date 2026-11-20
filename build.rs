@@ -1,7 +1,5 @@
 use std::process::Command;
 
-/// Embeds the Python interpreter's lib directory as an rpath so the binary can
-/// find `libpython3.x.dylib` at runtime (pyo3 links it dynamically).
 fn main() {
     let python = std::env::var("PYO3_PYTHON").unwrap_or_else(|_| "python3".to_string());
     let output = Command::new(&python)

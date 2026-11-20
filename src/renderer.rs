@@ -65,6 +65,10 @@ impl TerminalPane {
         pane
     }
 
+    pub fn lines(&self) -> &[String] {
+        &self.lines
+    }
+
     /// Returns the number of visible (non-ANSI-escape) characters in a string.
     fn visible_len(s: &str) -> usize {
         let mut count = 0;
@@ -120,6 +124,11 @@ impl TerminalPane {
         };
 
         self.lines.clear();
+
+        if content_width == 0 {
+            return;
+        }
+
         for line in text.split('\n') {
             let mut remaining = line;
             loop {
@@ -387,5 +396,44 @@ impl TerminalRenderer {
     pub fn clear_screen(&mut self) {
         self.sequencer.clear_screen(false, false, false);
         eprintln!("clear_screen");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn pane(width: usize, border: Option<BorderCharacters>) -> TerminalPane {
+        TerminalPane::new(0, 0, width, 10, "pane".into(), border, None, None)
+    }
+
+    #[test]
+    fn set_text_wraps_at_spaces() {
+        let mut pane = pane(10, None);
+        pane.set_text("hello there world".into());
+        assert_eq!(pane.lines(), ["hello", "there", "world"]);
+    }
+
+    #[test]
+    fn set_text_zero_width_without_border_stores_nothing() {
+        let mut pane = pane(0, None);
+        pane.set_text("hello".into());
+        assert!(pane.lines().is_empty());
+    }
+
+    #[test]
+    fn set_text_border_fills_width_stores_nothing() {
+        for width in 0..=2 {
+            let mut pane = pane(width, Some(BorderCharacters::ascii()));
+            pane.set_text("hello\nworld".into());
+            assert!(pane.lines().is_empty(), "width {width}");
+        }
+    }
+
+    #[test]
+    fn set_text_one_column_wraps_per_character() {
+        let mut pane = pane(3, Some(BorderCharacters::ascii()));
+        pane.set_text("abc".into());
+        assert_eq!(pane.lines(), ["a", "b", "c"]);
     }
 }
