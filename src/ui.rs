@@ -9,7 +9,7 @@ use crate::{
     lua::LuaPaneRuntime,
     python::PythonPaneRuntime,
     renderer::TerminalRenderer,
-    sequencer::EscapeSequencer, util,
+    sequencer::EscapeSequencer,
 };
 use pub_fields_macro::pub_fields;
 use termion::{event::{Event, Key}, input::TermRead};
@@ -154,8 +154,6 @@ impl TerminalUI {
     }
 
     pub fn from_config(config_path: &str) -> Result<Self> {
-        util::redirect_stderr();
-
         let config: TerminalUIConfig = match std::fs::File::open(config_path) {
             Ok(file) => match serde_json::from_reader(file) {
                 Ok(config) => config,
